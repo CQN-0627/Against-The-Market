@@ -1,0 +1,1 @@
+"""MarketError test suite."""
