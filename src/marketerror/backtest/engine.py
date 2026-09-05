@@ -7,8 +7,8 @@ results trustworthy:
 
     for each bar t:
         1. execute orders that were decided earlier and are due at t
-        2. mark equity using bar t's mid price
-        3. show bar t to the strategy and schedule its order for t + latency
+        2. show bar t to the strategy and schedule its order for t + latency
+        3. mark equity using bar t's mid price, after any same-bar fill
 
 An order is decided from information up to and including bar ``t``.  With the
 default ``latency_periods = 0`` it executes against bar ``t``'s own quotes,

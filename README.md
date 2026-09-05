@@ -77,15 +77,20 @@ expected return. (See [`docs/synthetic_market.md`](docs/synthetic_market.md).)
 ### 2. Disruptions measured in standard deviations
 
 Volatility is a percentage, spread is basis points, liquidity is a dimensionless
-multiplier. You cannot add them. MarketError standardizes every parameter against
-the dispersion of its baseline distribution,
+multiplier. You cannot add them. For parameters that may be negative, MarketError
+uses the ordinary standardized value against the baseline distribution,
 
 $$z = \frac{x-\mu}{\sigma},$$
 
-so a "+2σ spread shock" and a "−2σ liquidity shock" are on the same footing.
-Strictly positive parameters use a **log scale**, which keeps every market valid
-(volatility, spread, liquidity, price stay positive) for *any* z — no clipping,
-and the round trip $x\to z\to x$ is exact. (See
+so a "+2σ trend shock" and a "−2σ trend shock" use the ordinary linear rule.
+Strictly positive parameters use a **log scale**:
+
+$$z = \frac{\ln(x/\mu)}{\sigma_{\log}}, \qquad x = \mu e^{z\sigma_{\log}},$$
+
+This keeps volatility, spread, liquidity, and other positive market quantities
+valid for any z, without clipping, and the round trip $x\to z\to x$ is exact.
+Thus a "+2σ spread shock" and a "−2σ liquidity shock" are comparable in the
+same severity space even though their native units differ. (See
 [`docs/perturbations.md`](docs/perturbations.md).)
 
 ### 3. Severity as one number
@@ -306,6 +311,16 @@ python -m marketerror universe-optimize \
   --stocks 10 --days 252 --paths 32 \
   --dims volatility,spread,liquidity,trend,jump
 ```
+
+PowerShell users can run the same command on one line:
+
+```powershell
+python -m marketerror universe-optimize --strategy examples/universe_backtest.py:CrossSectionalMomentum --stocks 10 --days 252 --paths 32 --dims volatility,spread,liquidity,trend,jump
+```
+
+If PowerShell displays `>>`, it is waiting for an unfinished command, usually
+because a quote is unclosed or a continuation character was copied incorrectly.
+Press `Ctrl+C` to cancel the unfinished input and retry the one-line command.
 
 Use `--save` to write the experiment JSON under `results/experiments/`, and
 `--json` for machine-readable output. The command currently accepts a
