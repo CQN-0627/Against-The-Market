@@ -7,6 +7,10 @@ from .execution import ExecutionConfig, ExecutionModel
 from .metrics import PerformanceMetrics, compute_metrics
 from .orders import Fill, Order, Side
 from .portfolio import Portfolio
+from .universe_engine import UniverseBacktestResult, UniverseBacktester
+from .universe_execution import UniverseExecutionModel
+from .universe_orders import SymbolOrder
+from .universe_portfolio import UniversePortfolio
 
 __all__ = [
     "BacktestConfig",
@@ -19,5 +23,10 @@ __all__ = [
     "PerformanceMetrics",
     "Portfolio",
     "Side",
+    "SymbolOrder",
+    "UniverseBacktestResult",
+    "UniverseBacktester",
+    "UniverseExecutionModel",
+    "UniversePortfolio",
     "compute_metrics",
 ]

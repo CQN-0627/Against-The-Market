@@ -40,6 +40,7 @@ from .objective import (
     ScenarioEvaluation,
     parse_loss_time,
 )
+from .universe import UniverseExperimentRecord, UniverseExperimentSpec, run_universe_experiment
 
 __all__ = [
     "BisectionResult",
@@ -59,4 +60,7 @@ __all__ = [
     "parse_loss_time",
     "severity_profile",
     "slice_2d",
+    "UniverseExperimentRecord",
+    "UniverseExperimentSpec",
+    "run_universe_experiment",
 ]

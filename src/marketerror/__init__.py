@@ -28,6 +28,12 @@ __all__ = [
     "Strategy",
     "PerturbationVector",
     "FailureCriteria",
+    "AssetParameters",
+    "UniverseParameters",
+    "UniverseData",
+    "UniverseView",
+    "SymbolOrder",
+    "UniverseStrategy",
 ]
 
 
@@ -61,4 +67,20 @@ def __getattr__(name: str):  # pragma: no cover - thin lazy re-export shim
         from .optimization.objective import FailureCriteria
 
         return FailureCriteria
+    if name in ("AssetParameters", "UniverseParameters"):
+        from .market.universe import AssetParameters, UniverseParameters
+
+        return {"AssetParameters": AssetParameters, "UniverseParameters": UniverseParameters}[name]
+    if name in ("UniverseData", "UniverseView"):
+        from .data.universe_schema import UniverseData, UniverseView
+
+        return {"UniverseData": UniverseData, "UniverseView": UniverseView}[name]
+    if name == "SymbolOrder":
+        from .backtest.universe_orders import SymbolOrder
+
+        return SymbolOrder
+    if name == "UniverseStrategy":
+        from .strategies.universe_base import UniverseStrategy
+
+        return UniverseStrategy
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

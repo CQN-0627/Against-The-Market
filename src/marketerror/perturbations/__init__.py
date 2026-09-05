@@ -40,6 +40,7 @@ from .standardization import (
     to_z_score,
 )
 from .vector import PerturbationVector, severity
+from .universe import UniversePerturbationSpace
 
 __all__ = [
     "ALL_DIMENSION_NAMES",
@@ -56,4 +57,5 @@ __all__ = [
     "get_dimension",
     "severity",
     "to_z_score",
+    "UniversePerturbationSpace",
 ]

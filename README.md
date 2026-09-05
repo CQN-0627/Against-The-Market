@@ -165,33 +165,37 @@ therefore far milder than a crisis — worth knowing.
 Python 3.11+.
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .            # or: pip install numpy pandas scipy matplotlib
-pip install -e ".[dev]"     # to run the tests
+python -m venv .venv
+# macOS/Linux: source .venv/bin/activate
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
 ```
+
+On Windows, if you do not want to activate the environment, replace `python`
+below with `.\.venv\Scripts\python.exe`. The commands also work without a
+virtual environment when the package is already installed.
 
 ## Command line
 
 ```bash
 # One backtest on the unperturbed market
-marketerror run --strategy momentum --days 252 --seed 42
+python -m marketerror run --strategy momentum --days 252 --seed 42
 
 # Apply an explicit shock and compare against the baseline
-marketerror stress --strategy momentum --z volatility=1,spread=1,liquidity=-1
+python -m marketerror stress --strategy momentum --z volatility=1,spread=1,liquidity=-1
 
 # Find the minimum disruption that makes the strategy fail
-marketerror optimize --strategy momentum --paths 100 --losstime 3m --plots
+python -m marketerror optimize --strategy momentum --paths 100 --losstime 3m --plots
 
 # Compare several strategies
-marketerror compare --strategy momentum,mean_reversion,moving_average,buy_and_hold
+python -m marketerror compare --strategy momentum,mean_reversion,moving_average,buy_and_hold
 
 # Understand the calibration: what one sigma means, where the regimes sit
-marketerror regimes
-marketerror strategies
+python -m marketerror regimes
+python -m marketerror strategies
 ```
 
-Add `python -m` in front (`python -m marketerror ...`) if you didn't
-`pip install`. Use `--json` for machine-readable output, `--save` to export
+Use `--json` for machine-readable output, `--save` to export
 JSON + CSV, `--plots` to write figures, and `-j0` to parallelize across CPUs.
 
 ### `--losstime`: how long is "unprofitable"?
@@ -231,7 +235,7 @@ class MyStrategy(Strategy):
 ```
 
 ```bash
-marketerror optimize --strategy ./my_strategy.py --paths 100
+python -m marketerror optimize --strategy ./my_strategy.py --paths 100
 ```
 
 `on_data` receives a `MarketView` that can only see the current bar and earlier
@@ -241,13 +245,82 @@ with two strategies and rolling-feature use.
 
 ---
 
+## Multi-asset market
+
+MarketError also supports a correlated universe of synthetic instruments for
+portfolio and cross-sectional strategies. The multi-asset workflow is available
+through the Python API and the runnable example; the CLI commands above still
+operate on one instrument at a time.
+
+Each universe contains:
+
+- one price, return, volume, quote, and depth series per symbol;
+- a shared market factor plus idiosyncratic shocks, with
+  `corr(i, j) = beta_i * beta_j`;
+- one shared cash balance and one position per symbol;
+- per-symbol spread, depth, partial fills, market impact, and commissions;
+- causal cross-sectional features such as trailing-return ranking.
+
+Run the ten-stock example:
+
+```bash
+python examples/universe_backtest.py
+```
+
+The example generates ten correlated stocks, ranks them by trailing 20-period
+return, goes long the top three, shorts the bottom three, and reports the shared
+portfolio's equity and performance metrics.
+
+The same components can be used directly:
+
+```python
+from examples.universe_backtest import CrossSectionalMomentum
+from marketerror.backtest import UniverseBacktester
+from marketerror.data import SyntheticUniverseGenerator
+from marketerror.market import UniverseParameters
+
+parameters = UniverseParameters.dispersed(n_assets=10)
+market = SyntheticUniverseGenerator(parameters).generate(periods=252, seed=42)
+strategy = CrossSectionalMomentum()
+result = UniverseBacktester().run(market, strategy)
+```
+
+`UniverseData` stores fields as `(time, asset)` arrays. A `UniverseStrategy`
+returns `SymbolOrder` objects, and `UniverseView` exposes only the current bar
+and its history, preserving the existing no-look-ahead guarantee. Monte Carlo
+can repeat the entire ten-stock universe with different seeds. The ten symbols
+are the cross-section inside one scenario; Monte Carlo paths are alternative
+scenarios.
+
+The multi-asset optimizer is available through the `universe-optimize` CLI
+command. It applies each selected perturbation coherently across the stock pool,
+evaluates the portfolio over Monte Carlo universe paths, searches the grid in
+severity order, refines a boundary by radial bisection, and validates a found
+boundary on fresh seeds.
+
+Example:
+
+```bash
+python -m marketerror universe-optimize \
+  --strategy examples/universe_backtest.py:CrossSectionalMomentum \
+  --stocks 10 --days 252 --paths 32 \
+  --dims volatility,spread,liquidity,trend,jump
+```
+
+Use `--save` to write the experiment JSON under `results/experiments/`, and
+`--json` for machine-readable output. The command currently accepts a
+`UniverseStrategy` file reference rather than the single-asset built-in strategy
+names.
+
+---
+
 ## Run the experiments
 
 ```bash
 python examples/basic_backtest.py         # one baseline backtest
 python examples/basic_stress_test.py      # one explicit shock, before/after
 python examples/find_failure_boundary.py  # the full §-by-§ comparison above
-pytest                                    # 290 tests: math, no look-ahead, reproducibility
+python -m pytest                          # 300 tests: math, no look-ahead, reproducibility
 ```
 
 ---

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from .parameters import MarketParameters, ParameterError
+from .universe import AssetParameters, UniverseParameters
 from .regimes import REGIME_OVERRIDES, Regime, apply_regime, describe_regime
 
 __all__ = [
     "MarketParameters",
+    "AssetParameters",
+    "UniverseParameters",
     "ParameterError",
     "REGIME_OVERRIDES",
     "Regime",

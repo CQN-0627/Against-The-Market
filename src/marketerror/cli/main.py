@@ -31,6 +31,7 @@ examples:
   marketerror run --strategy momentum --days 252 --seed 42
   marketerror stress --strategy momentum --z volatility=1,spread=1,liquidity=-1
   marketerror optimize --strategy momentum --paths 100 --losstime 3m
+    marketerror universe-optimize --strategy ./examples/universe_backtest.py:CrossSectionalMomentum --stocks 10 --paths 32
   marketerror optimize --strategy ./my_strategy.py:Reverter --dims volatility,trend
   marketerror compare --strategy momentum,mean_reversion,moving_average,buy_and_hold
 """
@@ -261,6 +262,24 @@ def build_parser() -> argparse.ArgumentParser:
     _add_simulation_arguments(compare)
     _add_output_arguments(compare)
 
+    universe = sub.add_parser(
+        "universe-optimize",
+        help="search for a failure boundary in a multi-asset synthetic universe",
+    )
+    universe.add_argument(
+        "--strategy",
+        required=True,
+        help="a UniverseStrategy file reference, e.g. file.py:CrossSectionalMomentum",
+    )
+    universe.add_argument("--strategy-arg", action="append", default=[], metavar="KEY=VALUE")
+    universe.add_argument("--stocks", type=int, default=10, help="number of synthetic stocks")
+    _add_market_arguments(universe)
+    _add_backtest_arguments(universe)
+    _add_failure_arguments(universe)
+    _add_search_arguments(universe)
+    _add_simulation_arguments(universe)
+    _add_output_arguments(universe)
+
     return parser
 
 
@@ -282,6 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "stress": commands.cmd_stress,
         "optimize": commands.cmd_optimize,
         "compare": commands.cmd_compare,
+        "universe-optimize": commands.cmd_universe_optimize,
     }
     handler = handlers[args.command]
 

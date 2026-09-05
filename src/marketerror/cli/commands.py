@@ -22,6 +22,7 @@ __all__ = [
     "cmd_run",
     "cmd_strategies",
     "cmd_stress",
+    "cmd_universe_optimize",
 ]
 
 
@@ -625,4 +626,75 @@ def cmd_compare(args: Any, executor: Executor | None = None) -> int:
         f"searched {list(records[0].spec.dimensions)} within "
         f"+/-{records[0].spec.constraints.max_abs_z:g} sigma"
     )
+    return 0
+
+
+def cmd_universe_optimize(args: Any, executor: Executor | None = None) -> int:
+    """Optimize a UniverseStrategy over a correlated synthetic stock pool."""
+    from ..backtest.engine import BacktestConfig
+    from ..backtest.execution import ExecutionConfig
+    from ..market.universe import UniverseParameters
+    from ..optimization.constraints import PerturbationConstraints
+    from ..optimization.grid_search import GridSpec
+    from ..optimization.objective import FailureCriteria, parse_loss_time
+    from ..optimization.universe import UniverseExperimentSpec, run_universe_experiment
+    from ..strategies.universe_loader import UniverseStrategySpec
+
+    if args.stocks < 1:
+        raise ValueError("--stocks must be >= 1")
+    strategy = UniverseStrategySpec.parse(args.strategy, args.strategy_arg)
+    base = _market_parameters(args)
+    universe = UniverseParameters.dispersed(args.stocks, base=base)
+    criteria = FailureCriteria(
+        return_threshold=args.failure_return,
+        loss_periods=parse_loss_time(args.losstime, args.days, 252),
+        mean_return_threshold=args.mean_return_threshold,
+        min_loss_probability=args.min_loss_prob,
+        minimum_paths=min(32, args.paths),
+        require_mean_return=not args.ignore_mean_return,
+    )
+    levels = GridSpec(tuple(float(v) for v in args.levels.split(","))) if args.levels else GridSpec()
+    spec = UniverseExperimentSpec(
+        strategy=strategy,
+        market=universe,
+        dimensions=tuple(n.strip() for n in (args.dims or "volatility,spread,liquidity,trend,jump").split(",") if n.strip()),
+        constraints=PerturbationConstraints(max_abs_z=args.max_z, max_severity=args.max_severity),
+        grid=levels,
+        criteria=criteria,
+        backtest=BacktestConfig(
+            initial_capital=args.capital,
+            execution=ExecutionConfig(
+                commission_bps=args.commission_bps,
+                max_leverage=args.max_leverage,
+                allow_short=not args.no_short,
+                latency_periods=args.latency,
+            ),
+            record_fills=False,
+        ),
+        periods=args.days,
+        paths=args.paths,
+        seed=args.seed,
+        exhaustive=args.exhaustive or args.plots,
+        refine=not args.no_refine,
+        axis_scan=not args.no_axis_scan,
+    )
+    record = run_universe_experiment(spec)
+    if args.save:
+        print(f"saved {record.save(Path(args.out) / 'experiments')}")
+    if args.json:
+        print(json.dumps(record.to_dict(), indent=2, default=str))
+        return 0
+    print("MULTI-ASSET ROBUSTNESS REPORT")
+    print("=============================")
+    print(f"strategy: {strategy.class_name}; stocks: {args.stocks}; paths: {args.paths}")
+    print(f"baseline mean return: {record.baseline.summary.mean_return:+.2%}")
+    print(f"baseline failure probability: {record.baseline.summary.failure_probability:.1%}")
+    print("")
+    for line in record.boundary.report_lines():
+        print(line)
+    if record.validation is not None:
+        verdict = criteria.evaluate(record.validation)
+        print("")
+        print(f"validation: {'FAILED' if verdict.failed else 'not reproduced'} on {record.validation.n_paths} fresh paths")
+    print(f"\n{record.results.coverage_note()}")
     return 0

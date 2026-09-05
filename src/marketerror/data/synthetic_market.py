@@ -85,28 +85,54 @@ class SyntheticMarketGenerator:
         self,
         periods: int = 252,
         seed: int | Sequence[int] | np.random.SeedSequence = 0,
+        *,
+        factor: np.ndarray | None = None,
+        market_beta: float = 0.0,
+        stream_namespace: str = "",
     ) -> MarketData:
         """Generate one path of ``periods`` observations.
 
         ``price[0]`` is exactly ``initial_price`` and ``returns[0]`` is zero:
         the first bar is the starting state, not a move.  The AR(1) recursion is
         seeded from its stationary distribution, so there is no burn-in bias.
+
+        ``factor`` is an optional array of ``periods - 1`` unit-variance shocks
+        shared with other assets; ``market_beta`` in ``[-1, 1]`` is this asset's
+        loading on it.  The idiosyncratic part is rescaled by
+        ``sqrt(1 - beta**2)`` so the *total* shock keeps unit variance and the
+        asset's realised volatility stays on target -- correlation is therefore
+        another independent dial, not a hidden volatility shock.  Two assets
+        loading ``beta_i`` and ``beta_j`` on the same factor correlate at
+        ``beta_i * beta_j``.
+
+        ``stream_namespace`` suffixes every random stream name, which is what
+        keeps one asset's draws isolated from another's inside a universe.  The
+        defaults (no factor, no namespace) reproduce the single-asset path
+        bit-for-bit.
         """
         if periods < 2:
             raise ValueError("periods must be >= 2")
+        if not -1.0 <= market_beta <= 1.0:
+            raise ValueError("market_beta must lie in [-1, 1]")
         p = self.parameters
         source = dist.RandomSource(seed)
         moves = periods - 1
+        if factor is not None and len(factor) != moves:
+            raise ValueError(f"factor must have {moves} entries, got {len(factor)}")
 
         returns = np.zeros(periods)
-        returns[1:] = self._log_returns(source, moves)
+        returns[1:] = self._log_returns(
+            source, moves, factor, market_beta, stream_namespace
+        )
         price = p.initial_price * np.exp(np.cumsum(returns))
 
-        volume = self._volume(source, returns, periods)
-        spread_fraction = self._spread_fraction(source, periods)
+        volume = self._volume(source, returns, periods, stream_namespace)
+        spread_fraction = self._spread_fraction(source, periods, stream_namespace)
         spread = price * spread_fraction
         half = 0.5 * spread
-        bid_size, ask_size = self._book_depth(source, volume, periods)
+        bid_size, ask_size = self._book_depth(
+            source, volume, periods, stream_namespace
+        )
 
         return MarketData(
             timestamp=make_timestamps(periods, self.start, p.periods_per_year),
@@ -134,32 +160,46 @@ class SyntheticMarketGenerator:
             yield self.generate(periods=periods, seed=seed)
 
     # ----------------------------------------------------------------- process
-    def _log_returns(self, source: dist.RandomSource, moves: int) -> np.ndarray:
+    def _log_returns(
+        self,
+        source: dist.RandomSource,
+        moves: int,
+        factor: np.ndarray | None = None,
+        market_beta: float = 0.0,
+        namespace: str = "",
+    ) -> np.ndarray:
         p = self.parameters
         phi = p.trend_persistence
         target_variance = p.period_volatility**2
 
         epsilon, sigma = dist.garch_volatility_path(
-            source.stream("returns"),
+            source.stream(_stream("returns", namespace)),
             moves,
             target_variance=target_variance,
             alpha=p.garch_alpha,
             beta=p.garch_beta,
         )
 
+        if factor is not None and market_beta != 0.0:
+            # Variance-preserving blend, so beta buys correlation and nothing else.
+            idiosyncratic_scale = math.sqrt(max(0.0, 1.0 - market_beta * market_beta))
+            epsilon = market_beta * np.asarray(factor, dtype=np.float64) + (
+                idiosyncratic_scale * epsilon
+            )
+
         # Scale innovations so the AR(1)'s *stationary* variance is the target.
         innovation_scale = math.sqrt(max(0.0, 1.0 - phi * phi))
         innovations = epsilon * sigma * innovation_scale
 
         # Pre-sample lag drawn from the stationary distribution: no burn-in.
-        presample = source.stream("ar1_presample").standard_normal() * math.sqrt(
-            target_variance
-        )
+        presample = source.stream(
+            _stream("ar1_presample", namespace)
+        ).standard_normal() * math.sqrt(target_variance)
         centred = dist.ar1_filter(innovations, phi, initial_deviation=presample)
 
         jumps, _ = dist.jump_component(
-            source.stream("jump_indicator"),
-            source.stream("jump_size"),
+            source.stream(_stream("jump_indicator", namespace)),
+            source.stream(_stream("jump_size", namespace)),
             moves,
             probability=p.jump_probability,
             jump_size=p.jump_size,
@@ -174,7 +214,11 @@ class SyntheticMarketGenerator:
 
     # ---------------------------------------------------------- microstructure
     def _volume(
-        self, source: dist.RandomSource, returns: np.ndarray, periods: int
+        self,
+        source: dist.RandomSource,
+        returns: np.ndarray,
+        periods: int,
+        namespace: str = "",
     ) -> np.ndarray:
         """Log-normal volume, scaled by liquidity and by the size of the move.
 
@@ -184,7 +228,7 @@ class SyntheticMarketGenerator:
         """
         p = self.parameters
         activity = dist.lognormal_unit_mean(
-            source.stream("volume"), periods, p.volume_volatility
+            source.stream(_stream("volume", namespace)), periods, p.volume_volatility
         )
         base = p.average_volume * p.liquidity
 
@@ -200,7 +244,7 @@ class SyntheticMarketGenerator:
         return np.maximum(base * activity * flow, _MIN_VOLUME)
 
     def _spread_fraction(
-        self, source: dist.RandomSource, periods: int
+        self, source: dist.RandomSource, periods: int, namespace: str = ""
     ) -> np.ndarray:
         """Quoted spread as a fraction of mid.
 
@@ -211,12 +255,16 @@ class SyntheticMarketGenerator:
         p = self.parameters
         level = p.effective_spread_bps / 1e4
         noise = dist.lognormal_unit_mean(
-            source.stream("spread"), periods, p.spread_noise
+            source.stream(_stream("spread", namespace)), periods, p.spread_noise
         )
         return np.clip(level * noise, _MIN_SPREAD_FRACTION, _MAX_SPREAD_FRACTION)
 
     def _book_depth(
-        self, source: dist.RandomSource, volume: np.ndarray, periods: int
+        self,
+        source: dist.RandomSource,
+        volume: np.ndarray,
+        periods: int,
+        namespace: str = "",
     ) -> tuple[np.ndarray, np.ndarray]:
         """Top-of-book size per side, with a random bid/ask imbalance.
 
@@ -227,12 +275,19 @@ class SyntheticMarketGenerator:
         p = self.parameters
         depth = volume * p.depth_fraction
         imbalance = np.exp(
-            source.stream("depth_imbalance").standard_normal(periods)
+            source.stream(_stream("depth_imbalance", namespace)).standard_normal(
+                periods
+            )
             * _DEPTH_IMBALANCE_SIGMA
         )
         bid_size = np.maximum(depth * imbalance, _MIN_DEPTH)
         ask_size = np.maximum(depth / imbalance, _MIN_DEPTH)
         return bid_size, ask_size
+
+
+def _stream(name: str, namespace: str) -> str:
+    """Per-asset stream name.  Empty namespace reproduces single-asset draws."""
+    return f"{name}:{namespace}" if namespace else name
 
 
 def _describe_seed(seed: object) -> object:
